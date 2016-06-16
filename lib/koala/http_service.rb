@@ -74,6 +74,7 @@ module Koala
     #
     # @return [Koala::HTTPService::Response] a response object representing the results from Facebook
     def self.make_request(path, args, verb, options = {})
+
       # if the verb isn't get or post, send it as a post argument
       args.merge!({:method => verb}) && verb = "post" if verb != "get" && verb != "post"
 
@@ -101,7 +102,26 @@ module Koala
       # we have to manually assign params to the URL or the
       conn = Faraday.new(server(request_options), faraday_options(request_options), &(faraday_middleware || DEFAULT_MIDDLEWARE))
 
+      time_of_request = (Time.now.to_f * 1000.0).to_i
+
       response = conn.send(verb, path, (verb == "post" ? params : {}))
+
+      if options[:zendesk]
+        ::Channels::HttpCommunication.new(
+          source_type:      'facebook',
+          time_of_request:  time_of_request,
+          time_of_response: (Time.now.to_f * 1000.0).to_i,
+          url:              path,
+          request_method:   verb,
+          request_headers:  (verb == "post" ? params : {}),
+          http_code:        response.status.to_i,
+          body:             response.body,
+          response_headers: response.headers
+        ).tap do |cr|
+          cr.account_id = options[:zendesk][:account_id]
+          cr.source_id =  options[:zendesk][:source_id]
+        end.save!
+      end
 
       # Log URL information
       Koala::Utils.debug "#{verb.upcase}: #{path} params: #{params.inspect}"
